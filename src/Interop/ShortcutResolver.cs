@@ -15,6 +15,13 @@ namespace Dockyard.Interop
         public string IconPath = "";
     }
 
+    /// <summary>What a .url internet shortcut points at.</summary>
+    internal class UrlTarget
+    {
+        public string Url = "";
+        public string IconFile = "";
+    }
+
     /// <summary>Reads .lnk files through IShellLinkW so dropped Start-menu shortcuts work properly.</summary>
     internal static class ShortcutResolver
     {
@@ -127,20 +134,28 @@ namespace Dockyard.Interop
             }
         }
 
-        /// <summary>Pulls the URL out of an Internet Shortcut (.url) file.</summary>
-        public static string ResolveUrlFile(string urlPath)
+        /// <summary>
+        /// Pulls the URL and icon out of an Internet Shortcut (.url) file. Steam, Xbox and a few
+        /// launchers hand these out. The IconFile line matters: it names the .ico Explorer shows,
+        /// and asking the shell to render the .url itself comes back as a small icon painted on an
+        /// opaque white square, which is exactly what the dock must not put on a tile.
+        /// </summary>
+        public static UrlTarget ResolveUrlFile(string urlPath)
         {
+            UrlTarget target = new UrlTarget();
             try
             {
                 foreach (string line in File.ReadAllLines(urlPath))
                 {
                     string t = line.Trim();
-                    if (t.StartsWith("URL=", StringComparison.OrdinalIgnoreCase))
-                        return t.Substring(4).Trim();
+                    if (target.Url == "" && t.StartsWith("URL=", StringComparison.OrdinalIgnoreCase))
+                        target.Url = t.Substring(4).Trim();
+                    else if (target.IconFile == "" && t.StartsWith("IconFile=", StringComparison.OrdinalIgnoreCase))
+                        target.IconFile = Environment.ExpandEnvironmentVariables(t.Substring(9).Trim());
                 }
             }
             catch { }
-            return null;
+            return target;
         }
     }
 }

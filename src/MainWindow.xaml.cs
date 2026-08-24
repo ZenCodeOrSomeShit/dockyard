@@ -1353,8 +1353,14 @@ namespace Dockyard
 
             if (ext == ".url")
             {
-                string url = ShortcutResolver.ResolveUrlFile(path);
-                AddItem(name, string.IsNullOrWhiteSpace(url) ? path : url, "", "", path);
+                // Steam, Xbox and friends hand out .url files whose icon lives in the IconFile=
+                // line. Rendering the .url through the shell comes back as a small icon painted
+                // on an opaque white square, so go to the .ico directly when there is one.
+                UrlTarget u = ShortcutResolver.ResolveUrlFile(path);
+                string launch = string.IsNullOrWhiteSpace(u.Url) ? path : u.Url;
+                string icon = (!string.IsNullOrWhiteSpace(u.IconFile) &&
+                               File.Exists(u.IconFile)) ? u.IconFile : path;
+                AddItem(name, launch, "", "", icon);
                 return;
             }
 
