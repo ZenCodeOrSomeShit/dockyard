@@ -1,14 +1,17 @@
+<div align="center">
+
 # Dockyard
 
-A themeable desktop dock for Windows. Drop apps on it, they become tiles. Hover and they magnify,
-and the row spreads apart to make room.
+A themeable desktop dock for Windows. Drop apps on it, they become tiles.<br />
+Hover and they magnify, and the row spreads apart to make room.
 
-  <img src="images/CustomTheme.png" width="440" alt="The dock" />
+<img src="images/CustomTheme.png" width="440" alt="The dock" />
 
-**[Download the latest release →](../../releases/latest)**
+**[Download the latest release &rarr;](../../releases/latest)**
+
+</div>
 
 ---
-
 ## What it does
 
 - **Drop an app on it.** `.exe`, Start-menu shortcut, folder, document, or a URL dragged straight
