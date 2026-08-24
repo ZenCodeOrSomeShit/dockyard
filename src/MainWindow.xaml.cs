@@ -1058,43 +1058,35 @@ namespace Dockyard
             if (active)
             {
                 double m = horiz ? mouse.Value.X : mouse.Value.Y;
-
-                // Cross-axis attenuation: the effect fades with distance away from the slab, not
-                // just along it. Without this a cursor one pixel outside the dock gets the full
-                // effect while one pixel further out gets nothing — a hard edge. With it, proximity
-                // is smooth in every direction, macOS style. The reach is deliberately tight, and
-                // past the deadzone it is exactly zero: tiles there sit at rest, full stop.
-                double unit = Config.IconSize + Config.TileSpacing;
-                double sigmaCross = Math.Max(0.3, Config.MagnifyFalloff) * 0.55 * unit;
-                double deadzone = 1.5 * unit;
-                double crossMin, crossMax;
-                if (horiz) { crossMin = 0; crossMax = ItemsHost.RenderSize.Height; }
-                else { crossMin = 0; crossMax = ItemsHost.RenderSize.Width; }
                 double mCross = horiz ? mouse.Value.Y : mouse.Value.X;
-                double crossDist = Math.Max(0, Math.Max(crossMin - mCross, mCross - crossMax));
-                double reach = crossDist >= deadzone
-                    ? 0.0
-                    : Math.Exp(-(crossDist * crossDist) / (2 * sigmaCross * sigmaCross));
+
+                // Per-tile 2D distance: a tile responds to how far the cursor is from *it*, not
+                // from the dock's axis. Measuring the axis alone made row-mates grow in lockstep —
+                // hover one tile and the one beside it swelled too, since both sit at the same
+                // axis position. The sigma is narrower than the tile pitch, so the neighbour one
+                // slot over stays at rest: tiles respond individually, not as a row.
+                double unit = Config.IconSize + Config.TileSpacing;
+                double sigma = Math.Max(0.15, Config.MagnifyFalloff) * 0.35 * unit;
+                double deadzone = 1.5 * unit;
 
                 for (int i = 0; i < n; i++)
                 {
                     if (cps[i] == null) continue;
-                    double dist = Math.Abs(m - centre[i]);
+                    double dAxis = m - centre[i];
+                    double dCross = mCross - cross[i];
+                    double d2 = dAxis * dAxis + dCross * dCross;
 
                     if (Config.Magnify)
                     {
-                        // Falloff is measured in tile units, not in actual tile widths — labels
-                        // make tiles up to 1.7x the icon wide, and a sigma that wide pulled every
-                        // tile on the dock into the ripple. One falloff unit ≈ the hovered tile
-                        // plus its immediate neighbours, which is the macOS look.
-                        double sigma = Math.Max(0.25, Config.MagnifyFalloff) * 0.6 * unit;
-                        double f = Math.Exp(-(dist * dist) / (2 * sigma * sigma)) * reach;
+                        double f = d2 >= deadzone * deadzone
+                            ? 0.0
+                            : Math.Exp(-d2 / (2 * sigma * sigma));
                         scale[i] = 1.0 + (maxScale - 1.0) * f;
                         plate[i] = 0.95 * f;
                     }
                     else
                     {
-                        bool over = dist <= extent[i] / 2.0 && reach >= 0.5;
+                        bool over = d2 <= (extent[i] * extent[i]) / 4.0;
                         scale[i] = over ? maxScale : 1.0;
                         plate[i] = over ? 0.95 : 0.0;
                     }
