@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!--
+      Must match a runtime you actually have installed. Targeting an older band makes NuGet try to
+      download that band's targeting packs, which fails with NU1100 on a machine that can't reach
+      nuget.org. build.bat detects your SDK and overrides this, so the value here only matters for
+      `dotnet run` and IDEs.
+    -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>Dockyard</AssemblyName>
+    <RootNamespace>Dockyard</RootNamespace>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <Version>1.0.0</Version>
+    <Product>Dockyard</Product>
+    <Description>A themeable desktop dock widget for Windows.</Description>
+
+    <!-- No ApplicationManifest: WPF on .NET Core is already PerMonitorV2 DPI aware, so the manifest
+         bought nothing and a bad embedded manifest can produce an exe Windows refuses to load. -->
+
+    <!-- build.bat publishes into .\build, which lives under the project. Without this the next
+         build globs its own output back in as source. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);build\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+</Project>

@@ -98,6 +98,10 @@ Two options on the [latest release](../../releases/latest) — take either:
 
 Then drag an app onto the dock.
 
+To remove it later, `Uninstall-Dockyard.bat` is on the same release page. It handles either
+install route, shows you what it found before touching anything, and keeps your settings unless
+you tell it not to.
+
 If the release says the exe is standalone, it needs nothing else at all. Otherwise it wants the
 **.NET Desktop Runtime 8 or newer**, which most Windows machines already have — grab it from
 [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download/dotnet) if the dock doesn't
@@ -137,6 +141,65 @@ and it shows up in Task Manager's Startup tab like anything else.
 
 ---
 
+## Building it yourself
+
+Needs the **.NET SDK 8 or newer**. No NuGet packages to restore — the project has zero
+dependencies beyond the framework itself.
+
+```bash
+git clone https://github.com/ZenCodeOrSomeShit/dockyard
+cd dockyard/src
+dotnet run
+```
+
+For a release build, one standalone file with the runtime bundled in:
+
+```bash
+dotnet publish Dockyard.csproj -c Release -r win-x64 --self-contained true ^
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true ^
+  -p:EnableCompressionInSingleFile=true -o out
+```
+
+Or a small one that uses the .NET runtime already on the machine:
+
+```bash
+dotnet publish Dockyard.csproj -c Release -r win-x64 --self-contained false ^
+  -p:PublishSingleFile=true -o out
+```
+
+> **If you get `NU1100`,** the project is targeting a .NET band you don't have installed and NuGet
+> is trying to download its targeting packs. Add `-p:TargetFramework=netX.0-windows` matching your
+> SDK — check with `dotnet --version`.
+
+`installer/Dockyard.iss` builds the installer with [Inno Setup](https://jrsoftware.org/isinfo.php)
+once `out/Dockyard.exe` exists.
+
+### Layout
+
+```
+src/
+  App.xaml(.cs)             single-instance guard, respawn, context-menu styling
+  MainWindow.xaml(.cs)      the dock — magnification, drag, drop, z-order
+  SettingsWindow.xaml(.cs)  settings UI; panes are built in code
+  PromptWindow.cs           small themed text prompt (WPF ships no InputBox)
+  Themes/Controls.xaml      hand-templated sliders, switches, segments, fields
+  Models/                   DockConfig, DockItem
+  Services/
+    ConfigService.cs        JSON load/save, theme presets, migration, crash guard
+    ColorUtil.cs            hex / RGB / HSV conversion and the slider ramps
+    StartupService.cs       the per-user launch-at-login registry entry
+  Interop/
+    Native.cs               acrylic, monitor geometry, z-order, desktop reparenting
+    IconExtractor.cs        256px shell icons via IShellItemImageFactory
+    ShortcutResolver.cs     .lnk and .url parsing via IShellLinkW
+```
+
+Most of the interesting problems live in `Interop/` and in the z-order handling in
+`MainWindow.xaml.cs` — the comments there explain why things are done the way they are rather than
+the obvious way, which is usually because the obvious way doesn't work.
+
+---
+
 Built with WPF on .NET. No NuGet packages — just the framework and a fair amount of Win32.
 
-MIT licensed.
+MIT licensed — see [LICENSE](LICENSE).

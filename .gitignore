@@ -1,0 +1,23 @@
+# Build output
+bin/
+obj/
+out/
+publish/
+*.user
+*.suo
+
+# Runtime state — belongs on the machine, not in the repo
+config.json
+starting.flag
+diagnose.txt
+
+# Editors
+.vs/
+.vscode/
+.idea/
+*.DotSettings.user
+
+# OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
