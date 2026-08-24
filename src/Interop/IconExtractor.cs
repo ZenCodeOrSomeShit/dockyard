@@ -134,16 +134,49 @@ namespace Dockyard.Interop
             // Plain image files: just decode them.
             string ext = "";
             try { ext = Path.GetExtension(path).ToLowerInvariant(); } catch { }
-            if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".gif" || ext == ".ico")
+            if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".gif")
             {
                 ImageSource direct = LoadImageFile(path);
                 if (direct != null) return direct;
+            }
+            if (ext == ".ico")
+            {
+                // Multi-size .ico: pick the biggest frame ourselves. The default decoder grabs
+                // whichever frame it feels like, which is often the 16px one, and a 16px frame
+                // scaled up to a tile looks exactly like the "shrunken icon" bug.
+                ImageSource ico = LoadIcoLargest(path);
+                if (ico != null) return ico;
             }
 
             ImageSource shell = FromShellItem(path, size);
             if (shell != null) return shell;
 
             return FromShGetFileInfo(path);
+        }
+
+        private static ImageSource LoadIcoLargest(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return null;
+                IconBitmapDecoder decoder = new IconBitmapDecoder(
+                    new Uri(path, UriKind.Absolute),
+                    BitmapCreateOptions.PreservePixelFormat,
+                    BitmapCacheOption.OnLoad);            // don't keep a file lock
+                BitmapFrame best = null;
+                foreach (BitmapFrame frame in decoder.Frames)
+                {
+                    if (best == null ||
+                        frame.PixelWidth * frame.PixelHeight > best.PixelWidth * best.PixelHeight)
+                    {
+                        best = frame;
+                    }
+                }
+                if (best == null) return null;
+                best.Freeze();
+                return best;
+            }
+            catch { return null; }
         }
 
         private static ImageSource LoadImageFile(string path)
