@@ -1,0 +1,21 @@
+# Normalise line endings so Git stops warning about LF/CRLF on every commit.
+# Text files are stored with LF in the repo and checked out however your platform
+# prefers; binaries are left completely alone.
+
+* text=auto
+
+*.cs      text diff=csharp
+*.csproj  text
+*.xaml    text
+*.manifest text
+*.iss     text
+*.md      text
+*.json    text
+*.gitignore text
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.zip binary
