@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -106,6 +108,45 @@ namespace Dockyard
 
         private bool Horizontal => DockOrientation == Orientation.Horizontal;
 
+        /// <summary>Row count (columns when vertical), clamped to something sane.</summary>
+        public int Rows => Math.Max(1, Math.Min(4, Config.Rows));
+
+        /// <summary>
+        /// Constrain the WrapPanel so tiles wrap onto the next line after N lines' worth.
+        ///
+        /// The line unit comes from the tiles themselves rather than IconSize + spacing: a tile's
+        /// layout slot is as wide as its label (up to 1.7x the icon), so guessing from the config
+        /// undershoots and the wrap lands mid-line, scrambling the rows. Measured off the live
+        /// containers it is exact, and it keeps tracking label/icon-size changes for free.
+        ///
+        /// One line means no constraint and the panel behaves like a plain StackPanel.
+        /// </summary>
+        private void UpdateWrapConstraint()
+        {
+            double unit = 0;
+            for (int i = 0; i < Items.Count; i++)
+            {
+                ContentPresenter cp = ContainerAt(i);
+                if (cp == null) continue;
+                unit = Math.Max(unit, Horizontal ? cp.ActualWidth : cp.ActualHeight);
+            }
+            if (unit <= 0) unit = Config.IconSize + Config.TileSpacing;   // nothing generated yet
+
+            // Half a DIP of slack absorbs layout rounding so a full line of tiles always fits.
+            double extent = Rows > 1 ? Rows * unit + 0.5 : double.PositiveInfinity;
+
+            if (Horizontal)
+            {
+                ItemsHost.MaxWidth = extent;
+                ItemsHost.MaxHeight = double.PositiveInfinity;
+            }
+            else
+            {
+                ItemsHost.MaxHeight = extent;
+                ItemsHost.MaxWidth = double.PositiveInfinity;
+            }
+        }
+
         // ==================================================================
         public MainWindow()
         {
@@ -120,6 +161,12 @@ namespace Dockyard
 
             InitializeComponent();
             DataContext = this;
+            UpdateWrapConstraint();
+
+            // Tiles get generated, labels toggle, icon size changes — the wrap constraint follows
+            // whatever the containers actually measure. Setting the same value is a no-op, so
+            // this settles after one extra pass rather than looping.
+            ItemsHost.LayoutUpdated += (s, e) => UpdateWrapConstraint();
 
             foreach (DockItem it in Config.Items)
             {
@@ -703,6 +750,8 @@ namespace Dockyard
             Raise(nameof(LabelVisibility));
             Raise(nameof(DockOrientation));
             Raise(nameof(TileMargin));
+            Raise(nameof(Rows));
+            UpdateWrapConstraint();
         }
 
         private void RefreshEmptyHint()
@@ -949,6 +998,10 @@ namespace Dockyard
         /// of each other's way instead of overlapping. That combination is what reads as a dock
         /// rather than a row of buttons that happen to get bigger.
         ///
+        /// With more than one row, only the line the cursor is over magnifies; the other lines sit
+        /// at rest. The re-spread is computed within that line alone, so rows never shove each
+        /// other around.
+        ///
         /// Positions are measured on the ContentPresenter, not on the tile, because the tile carries
         /// the render transform — measuring it would feed its own output back into the input.
         /// </summary>
@@ -965,6 +1018,7 @@ namespace Dockyard
             ContentPresenter[] cps = new ContentPresenter[n];
             Grid[] tiles = new Grid[n];
             double[] centre = new double[n];
+            double[] cross = new double[n];
             double[] extent = new double[n];
             double[] scale = new double[n];
             double[] plate = new double[n];
@@ -984,17 +1038,49 @@ namespace Dockyard
                     new Point(cps[i].ActualWidth / 2.0, cps[i].ActualHeight / 2.0), ItemsHost);
 
                 centre[i] = horiz ? c.X : c.Y;
+                cross[i] = horiz ? c.Y : c.X;
                 extent[i] = horiz ? cps[i].ActualWidth : cps[i].ActualHeight;
                 if (extent[i] <= 1) extent[i] = fallbackUnit;
             }
 
+            // --- which line is the cursor on ---------------------------------
+            // Tiles are uniform, so one line's cross-axis size is the same for every tile. Rows
+            // stack in flow order, so a tile's line is just its cross position divided by that
+            // size. When the dock is a single line (or the cursor is elsewhere) everything is
+            // "active" and the behaviour is the classic single-row dock.
+            int[] line = null;
+            if (active && Rows > 1)
+            {
+                double lineSize = 0;
+                for (int i = 0; i < n; i++)
+                    lineSize = Math.Max(lineSize, horiz ? cps[i]?.ActualHeight ?? 0 : cps[i]?.ActualWidth ?? 0);
+                if (lineSize <= 1) lineSize = fallbackUnit;
+
+                double mCross = horiz ? mouse.Value.Y : mouse.Value.X;
+                int activeLine = Math.Max(0, (int)(mCross / lineSize));
+
+                List<int> hits = new List<int>(n);
+                for (int i = 0; i < n; i++)
+                {
+                    if (cps[i] == null) continue;
+                    int row = Math.Max(0, (int)(cross[i] / lineSize));
+                    if (row == activeLine) hits.Add(i);
+                }
+                if (hits.Count > 0) line = hits.ToArray();
+            }
+
             // --- how big does each tile get -------------------------------
-            if (active)
+            if (active && (line != null || Rows <= 1))
             {
                 double m = horiz ? mouse.Value.X : mouse.Value.Y;
 
-                for (int i = 0; i < n; i++)
+                // Magnification and the re-spread only ever look at tiles on the active line, so
+                // tiles on other lines can't dilute the falloff or the spread arithmetic.
+                int count = line != null ? line.Length : n;
+
+                for (int k = 0; k < count; k++)
                 {
+                    int i = line != null ? line[k] : k;
                     if (cps[i] == null) continue;
                     double dist = Math.Abs(m - centre[i]);
 
@@ -1018,19 +1104,21 @@ namespace Dockyard
                 {
                     // growth[i] = how far tile i's centre would slide if every tile before it grew.
                     double running = 0;
-                    double[] growth = new double[n];
-                    for (int i = 0; i < n; i++)
+                    double[] growth = new double[count];
+                    for (int k = 0; k < count; k++)
                     {
+                        int i = line != null ? line[k] : k;
                         double extra = extent[i] * (scale[i] - 1.0);
-                        growth[i] = running + extra / 2.0;
+                        growth[k] = running + extra / 2.0;
                         running += extra;
                     }
 
                     // Anchor the spread at the cursor, interpolated across the tile it sits on so
                     // the whole row doesn't jump when the cursor crosses a boundary.
                     double anchor = 0;
-                    for (int i = 0; i < n; i++)
+                    for (int k = 0; k < count; k++)
                     {
+                        int i = line != null ? line[k] : k;
                         double extra = extent[i] * (scale[i] - 1.0);
                         double left = centre[i] - extent[i] / 2.0;
                         double t = (m - left) / Math.Max(1, extent[i]);
@@ -1038,8 +1126,11 @@ namespace Dockyard
                     }
 
                     double cap = MagnifyBleed;
-                    for (int i = 0; i < n; i++)
-                        offset[i] = Math.Max(-cap, Math.Min(cap, growth[i] - anchor));
+                    for (int k = 0; k < count; k++)
+                    {
+                        int i = line != null ? line[k] : k;
+                        offset[i] = Math.Max(-cap, Math.Min(cap, growth[k] - anchor));
+                    }
                 }
             }
 
@@ -1143,17 +1234,20 @@ namespace Dockyard
             int from = Items.IndexOf(_pressItem);
             if (from < 0) return;
 
+            // Nearest tile centre, in both axes. On a single line this reduces to the old
+            // along-the-axis behaviour; with multiple rows it means the tile you're actually
+            // pointing at, wherever it sits.
             int target = from;
+            double best = double.MaxValue;
             for (int i = 0; i < Items.Count; i++)
             {
                 ContentPresenter cp = ContainerAt(i);
                 if (cp == null) continue;
                 Point c = cp.TranslatePoint(new Point(cp.ActualWidth / 2.0, cp.ActualHeight / 2.0), ItemsHost);
-                double m = Horizontal ? mouseInHost.X : mouseInHost.Y;
-                double cc = Horizontal ? c.X : c.Y;
-
-                if (i < from && m < cc) { target = i; break; }
-                if (i > from && m > cc) target = i;
+                double dx = mouseInHost.X - c.X;
+                double dy = mouseInHost.Y - c.Y;
+                double d = dx * dx + dy * dy;
+                if (d < best) { best = d; target = i; }
             }
 
             if (target != from)
@@ -1408,10 +1502,77 @@ namespace Dockyard
         private void OnRightClick(object sender, MouseButtonEventArgs e)
         {
             DockItem item = ItemFromSource(e.OriginalSource);
-            ContextMenu menu = item != null ? BuildTileMenu(item) : BuildDockMenu();
+            OpenMenu(item != null ? BuildTileMenu(item) : BuildDockMenu());
+            e.Handled = true;
+        }
+
+        private ContextMenu _openMenu;
+        // Rooted here on purpose: the native hook holds only a function pointer, so if nothing
+        // managed references the delegate the GC collects it and the next mouse click anywhere
+        // on the system calls into collected memory — which kills the process (FailFast).
+        private Native.LowLevelMouseProc _menuProc;
+
+        private void OpenMenu(ContextMenu menu)
+        {
+            CloseOpenMenu();
+            _openMenu = menu;
+
+            IntPtr hook = IntPtr.Zero;
+            _menuProc = (nCode, w, l) =>
+            {
+                if (nCode >= 0 && _openMenu != null)
+                {
+                    int msg = w.ToInt32();
+                    if (msg == Native.WM_LBUTTONDOWN || msg == Native.WM_RBUTTONDOWN ||
+                        msg == Native.WM_XBUTTONDOWN)
+                    {
+                        Native.MSLLHOOKSTRUCT info = (Native.MSLLHOOKSTRUCT)Marshal.PtrToStructure(
+                            l, typeof(Native.MSLLHOOKSTRUCT));
+
+                        IntPtr hit = Native.WindowAt(info.pt);
+                        if (hit == IntPtr.Zero || !Native.IsOwnWindow(hit))
+                        {
+                            // Off our windows entirely: the menu is done. Deferred to the dispatcher
+                            // because a hook must not touch WPF objects synchronously.
+                            Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                if (_openMenu != null) _openMenu.IsOpen = false;
+                            }));
+                        }
+                    }
+                }
+                return Native.NextMouseHook(hook, nCode, w, l);
+            };
+
+            hook = Native.SetMouseHook(_menuProc);
+            if (hook == IntPtr.Zero)
+            {
+                _menuProc = null;
+                // No hook available; the menu still opens, it just loses the foreign-click close.
+                menu.PlacementTarget = this;
+                menu.IsOpen = true;
+                return;
+            }
+
+            menu.Closed += (s, e) =>
+            {
+                Native.RemoveMouseHook(hook);
+                _menuProc = null;
+                if (_openMenu == menu) _openMenu = null;
+            };
+
             menu.PlacementTarget = this;
             menu.IsOpen = true;
-            e.Handled = true;
+        }
+
+        private void CloseOpenMenu()
+        {
+            ContextMenu m = _openMenu;
+            _openMenu = null;
+            if (m != null)
+            {
+                try { m.IsOpen = false; } catch { }
+            }
         }
 
         private static MenuItem Mi(string header, Action action, bool isCheckable = false, bool isChecked = false)

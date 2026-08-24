@@ -15,6 +15,12 @@ namespace Dockyard.Models
         /// <summary>Gap between tiles.</summary>
         public double TileSpacing { get; set; } = 14;
 
+        /// <summary>
+        /// How many rows a horizontal dock wraps into (columns when vertical). 1 is the classic
+        /// single line; 2+ wraps tiles onto a new line when a row is full.
+        /// </summary>
+        public int Rows { get; set; } = 1;
+
         /// <summary>Inner padding of the dock slab.</summary>
         public double Padding { get; set; } = 14;
 

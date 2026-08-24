@@ -1,7 +1,9 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
+using Dockyard.Interop;
 
 namespace Dockyard
 {
@@ -49,7 +51,35 @@ namespace Dockyard
                 args.Handled = true;
             };
 
+            BoostScheduling();
+
             Spawn();
+        }
+
+        /// <summary>
+        /// A dock is invisible most of the time, which is exactly the profile Windows'
+        /// power throttling loves to park on efficiency cores — and the first thing you
+        /// notice is the magnification or auto-hide animation arriving a beat late.
+        /// High priority keeps the render and timer work ahead of ordinary background
+        /// chatter, and the power-throttling exemption stops the scheduler from
+        /// downgrading the process at all once it has been idle a while. Neither asks
+        /// for more than the dock actually needs; RealTime would, so it stays off.
+        /// </summary>
+        private void BoostScheduling()
+        {
+            try
+            {
+                using (Process p = Process.GetCurrentProcess())
+                {
+                    p.PriorityClass = ProcessPriorityClass.High;
+                    Native.DisablePowerThrottling(p.Handle);
+                }
+            }
+            catch
+            {
+                // Some managed environments refuse the priority change. A dock at normal
+                // priority still works; it just isn't as eager.
+            }
         }
 
         /// <summary>

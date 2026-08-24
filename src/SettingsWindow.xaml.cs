@@ -629,6 +629,13 @@ namespace Dockyard
                     new[] { "Horizontal", "Vertical" },
                     Cfg.Orientation, v => Cfg.Orientation = v),
 
+                SegmentRow("Rows", "Wrap tiles onto more than one line when a row fills up. " +
+                    "Magnification follows the line under the cursor.",
+                    new[] { "1", "2", "3", "4" },
+                    new[] { "1", "2", "3", "4" },
+                    Math.Max(1, Math.Min(4, Cfg.Rows)).ToString(),
+                    v => { int r; int.TryParse(v, out r); Cfg.Rows = Math.Max(1, Math.Min(4, r)); }),
+
                 SliderRow("Icon size", "Ctrl+scroll over the dock does this too.",
                     24, 128, Cfg.IconSize, "0", v => Cfg.IconSize = Math.Round(v)),
 

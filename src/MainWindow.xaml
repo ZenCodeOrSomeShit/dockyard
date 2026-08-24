@@ -96,8 +96,12 @@
                               ClipToBounds="False">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <StackPanel Orientation="{Binding DockOrientation, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        ClipToBounds="False" />
+                            <!-- A WrapPanel rather than a StackPanel: with Rows > 1 the code-behind
+                                 constrains its extent so tiles flow onto the next line. With the
+                                 default of 1 row the constraint is infinite and it behaves exactly
+                                 like the old StackPanel. -->
+                            <WrapPanel Orientation="{Binding DockOrientation, RelativeSource={RelativeSource AncestorType=Window}}"
+                                       ClipToBounds="False" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                 </ItemsControl>

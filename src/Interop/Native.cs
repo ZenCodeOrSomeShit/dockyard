@@ -433,5 +433,124 @@ namespace Dockyard.Interop
             // Fallback: primary screen guess.
             return new RECT { Left = 0, Top = 0, Right = 1920, Bottom = 1080 };
         }
+
+        // ------------------------------------------------------------------
+        //  Low-level mouse hook. The dock never activates, so a WPF context
+        //  menu opened from it never sees the "click outside" that closes
+        //  normal menus — clicks on the desktop belong to other windows and
+        //  arrive without the popup losing capture. The hook is what closes
+        //  the menu when a click lands anywhere the menu isn't.
+        // ------------------------------------------------------------------
+
+        internal delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct MSLLHOOKSTRUCT
+        {
+            public POINT pt;
+            public uint mouseData;
+            public uint flags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        private const int WH_MOUSE_LL = 14;
+        internal const int WM_LBUTTONDOWN = 0x0201;
+        internal const int WM_RBUTTONDOWN = 0x0204;
+        internal const int WM_XBUTTONDOWN = 0x020B;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SetWindowsHookExW(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr GetModuleHandleW(string lpModuleName);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr WindowFromPoint(POINT p);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        /// <summary>Install a global low-level mouse hook. Keep the returned delegate alive yourself.</summary>
+        internal static IntPtr SetMouseHook(LowLevelMouseProc proc)
+        {
+            return SetWindowsHookExW(WH_MOUSE_LL, proc, GetModuleHandleW(null), 0);
+        }
+
+        internal static bool RemoveMouseHook(IntPtr hook)
+        {
+            return hook != IntPtr.Zero && UnhookWindowsHookEx(hook);
+        }
+
+        internal static IntPtr NextMouseHook(IntPtr hook, int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            return CallNextHookEx(hook, nCode, wParam, lParam);
+        }
+
+        /// <summary>The window under a screen point, or IntPtr.Zero.</summary>
+        internal static IntPtr WindowAt(POINT screenPt)
+        {
+            return WindowFromPoint(screenPt);
+        }
+
+        /// <summary>True when the window belongs to this process's UI thread.</summary>
+        internal static bool IsOwnWindow(IntPtr hwnd)
+        {
+            uint pid;
+            uint tid = GetWindowThreadProcessId(hwnd, out pid);
+            return tid == GetCurrentThreadId();
+        }
+
+        // ------------------------------------------------------------------
+        //  Power throttling. Windows parks background windows on efficiency
+        //  cores and throttles their timers, which shows up as a dock that
+        //  stutters or animates late after a while in the background. Opting
+        //  out (with high process priority) keeps the dock's animation and
+        //  hide timers crisp no matter how long it sits below everything.
+        // ------------------------------------------------------------------
+
+        private const int ProcessPowerThrottling = 4;
+        private const uint PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 0x1;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_POWER_THROTTLING_STATE
+        {
+            public uint Version;
+            public uint ControlMask;
+            public uint StateMask;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetProcessInformation(IntPtr hProcess, int ProcessInformationClass,
+            ref PROCESS_POWER_THROTTLING_STATE ProcessInformation, int ProcessInformationSize);
+
+        /// <summary>Ask Windows never to power-throttle this process. Best effort; returns false if unsupported.</summary>
+        internal static bool DisablePowerThrottling(IntPtr processHandle)
+        {
+            try
+            {
+                PROCESS_POWER_THROTTLING_STATE state = new PROCESS_POWER_THROTTLING_STATE
+                {
+                    Version = 1,
+                    ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+                    StateMask = 0                    // 0 in the state mask = throttling disabled
+                };
+                return SetProcessInformation(processHandle, ProcessPowerThrottling, ref state,
+                    Marshal.SizeOf(typeof(PROCESS_POWER_THROTTLING_STATE)));
+            }
+            catch
+            {
+                return false;
+            }
+        }
     }
 }
