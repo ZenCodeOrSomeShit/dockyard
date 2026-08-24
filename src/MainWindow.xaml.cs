@@ -1092,43 +1092,9 @@ namespace Dockyard
                     }
                 }
 
-                // --- re-spread so nothing overlaps, one line at a time ----
-                if (Config.Magnify)
-                {
-                    foreach (int[] line in LinesOf(cps, cross, n, horiz, fallbackUnit))
-                    {
-                        int count = line.Length;
-
-                        // growth[k] = how far tile k's centre would slide if every tile before it grew.
-                        double running = 0;
-                        double[] growth = new double[count];
-                        for (int k = 0; k < count; k++)
-                        {
-                            double extra = extent[line[k]] * (scale[line[k]] - 1.0);
-                            growth[k] = running + extra / 2.0;
-                            running += extra;
-                        }
-
-                        // Anchor the spread at the cursor, interpolated across the tile it sits on so
-                        // the whole line doesn't jump when the cursor crosses a boundary.
-                        double anchor = 0;
-                        for (int k = 0; k < count; k++)
-                        {
-                            int i = line[k];
-                            double extra = extent[i] * (scale[i] - 1.0);
-                            double left = centre[i] - extent[i] / 2.0;
-                            double t = (m - left) / Math.Max(1, extent[i]);
-                            anchor += extra * Math.Max(0, Math.Min(1, t));
-                        }
-
-                        double cap = MagnifyBleed;
-                        for (int k = 0; k < count; k++)
-                        {
-                            int i = line[k];
-                            offset[i] = Math.Max(-cap, Math.Min(cap, growth[k] - anchor));
-                        }
-                    }
-                }
+                // No re-spread: the classic dock shoved neighbours aside to make room for the
+                // grown tile, but with per-tile magnification that slide read as "everything
+                // is growing". Tiles scale in place; nothing moves.
             }
 
             // --- apply -----------------------------------------------------
@@ -1149,45 +1115,6 @@ namespace Dockyard
                     if (tb != null) tb.Opacity = 0.62 + 0.38 * plate[i];
                 }
             }
-        }
-
-        /// <summary>
-        /// Group tile indices into lines (rows when horizontal, columns when vertical) so each
-        /// line can re-spread independently. Tiles are uniform, so a tile's line is just its
-        /// cross-axis centre divided by the line pitch. One line when Rows is 1.
-        /// </summary>
-        private int[][] LinesOf(ContentPresenter[] cps, double[] cross, int n, bool horiz, double fallbackUnit)
-        {
-            if (Rows <= 1)
-            {
-                int[] all = new int[n];
-                for (int i = 0; i < n; i++) all[i] = i;
-                return new int[][] { all };
-            }
-
-            double pitch = 0;
-            for (int i = 0; i < n; i++)
-                if (cps[i] != null)
-                    pitch = Math.Max(pitch, horiz ? cps[i].ActualHeight : cps[i].ActualWidth);
-            if (pitch <= 1) pitch = fallbackUnit;
-
-            SortedDictionary<int, List<int>> groups = new SortedDictionary<int, List<int>>();
-            for (int i = 0; i < n; i++)
-            {
-                if (cps[i] == null) continue;
-                int line = Math.Max(0, (int)(cross[i] / pitch));
-                if (!groups.TryGetValue(line, out List<int> g))
-                {
-                    g = new List<int>();
-                    groups[line] = g;
-                }
-                g.Add(i);
-            }
-
-            int[][] result = new int[groups.Count][];
-            int k = 0;
-            foreach (List<int> g in groups.Values) result[k++] = g.ToArray();
-            return result;
         }
 
         /// <summary>
