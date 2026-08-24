@@ -1063,11 +1063,12 @@ namespace Dockyard
                 // Per-tile 2D distance: a tile responds to how far the cursor is from *it*, not
                 // from the dock's axis. Measuring the axis alone made row-mates grow in lockstep —
                 // hover one tile and the one beside it swelled too, since both sit at the same
-                // axis position. The sigma is narrower than the tile pitch, so the neighbour one
-                // slot over stays at rest: tiles respond individually, not as a row.
+                // axis position. The sigma is a bit over half a tile pitch, so the hovered tile
+                // leads, its direct neighbours join clearly, and parking the cursor between tiles
+                // lets the two, three or four nearest share the effect.
                 double unit = Config.IconSize + Config.TileSpacing;
-                double sigma = Math.Max(0.15, Config.MagnifyFalloff) * 0.35 * unit;
-                double deadzone = 1.5 * unit;
+                double sigma = Math.Max(0.25, Config.MagnifyFalloff) * 0.55 * unit;
+                double deadzone = 2.2 * unit;
 
                 for (int i = 0; i < n; i++)
                 {
