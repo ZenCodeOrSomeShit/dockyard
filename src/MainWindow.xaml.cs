@@ -70,6 +70,7 @@ namespace Dockyard
         private bool _autoHidden;
         private double _shownLeft, _shownTop;   // always screen coordinates
         private bool _userMoved;
+        private DispatcherTimer _proximityTimer;
 
         // Set once the window has been reparented into the desktop. While attached, Left/Top are
         // relative to the host's client area rather than the screen, so everything that cares about
@@ -255,6 +256,7 @@ namespace Dockyard
                 UserClosed = true;
                 _guardTimer.Stop();
                 _hideTimer.Stop();
+                _proximityTimer.Stop();
                 SaveNow();
                 DetachFromDesktop();
 
@@ -275,9 +277,16 @@ namespace Dockyard
             PreviewMouseLeftButtonDown += OnPreviewLeftDown;
             PreviewMouseLeftButtonUp += OnPreviewLeftUp;
             MouseMove += OnMouseMoveWindow;
-            MouseLeave += (s, e) => UpdateMagnification(null, true);
             PreviewMouseWheel += OnWheel;
             MouseRightButtonUp += OnRightClick;
+
+            // Magnification reacts to the cursor anywhere near the dock, not only while it is
+            // over the window — hovering the desktop beside the dock raises the edge tiles, the
+            // way a dock should. MouseMove handles the in-window case directly; this poll feeds
+            // the true cursor position from anywhere else, and the falloff does the rest.
+            _proximityTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+            _proximityTimer.Tick += (s, e) => UpdateProximity();
+            _proximityTimer.Start();
 
             DragEnter += OnDragEnter;
             DragOver += OnDragOver;
@@ -994,13 +1003,15 @@ namespace Dockyard
 
         /// <summary>
         /// mouse == null resets everything to rest. Otherwise every tile is scaled by how close the
-        /// cursor is to it, and the row is re-spread around the cursor so grown neighbours slide out
-        /// of each other's way instead of overlapping. That combination is what reads as a dock
-        /// rather than a row of buttons that happen to get bigger.
+        /// cursor is to it along the dock's axis, and each line re-spreads around the cursor so
+        /// grown neighbours slide out of each other's way instead of overlapping. That combination
+        /// is what reads as a dock rather than a row of buttons that happen to get bigger.
         ///
-        /// With more than one row, only the line the cursor is over magnifies; the other lines sit
-        /// at rest. The re-spread is computed within that line alone, so rows never shove each
-        /// other around.
+        /// Proximity is deliberately global: every line magnifies from the same axis distance, so
+        /// hovering the middle of a multi-row dock raises a column of tiles, exactly like the
+        /// macOS dock raises one icon per row. The re-spread, though, is computed per line — lines
+        /// must never shove each other around. The cursor position may lie outside the dock
+        /// entirely; the falloff just fades to zero out there.
         ///
         /// Positions are measured on the ContentPresenter, not on the tile, because the tile carries
         /// the render transform — measuring it would feed its own output back into the input.
@@ -1043,93 +1054,87 @@ namespace Dockyard
                 if (extent[i] <= 1) extent[i] = fallbackUnit;
             }
 
-            // --- which line is the cursor on ---------------------------------
-            // Tiles are uniform, so one line's cross-axis size is the same for every tile. Rows
-            // stack in flow order, so a tile's line is just its cross position divided by that
-            // size. When the dock is a single line (or the cursor is elsewhere) everything is
-            // "active" and the behaviour is the classic single-row dock.
-            int[] line = null;
-            if (active && Rows > 1)
-            {
-                double lineSize = 0;
-                for (int i = 0; i < n; i++)
-                    lineSize = Math.Max(lineSize, horiz ? cps[i]?.ActualHeight ?? 0 : cps[i]?.ActualWidth ?? 0);
-                if (lineSize <= 1) lineSize = fallbackUnit;
-
-                double mCross = horiz ? mouse.Value.Y : mouse.Value.X;
-                int activeLine = Math.Max(0, (int)(mCross / lineSize));
-
-                List<int> hits = new List<int>(n);
-                for (int i = 0; i < n; i++)
-                {
-                    if (cps[i] == null) continue;
-                    int row = Math.Max(0, (int)(cross[i] / lineSize));
-                    if (row == activeLine) hits.Add(i);
-                }
-                if (hits.Count > 0) line = hits.ToArray();
-            }
-
             // --- how big does each tile get -------------------------------
-            if (active && (line != null || Rows <= 1))
+            if (active)
             {
                 double m = horiz ? mouse.Value.X : mouse.Value.Y;
 
-                // Magnification and the re-spread only ever look at tiles on the active line, so
-                // tiles on other lines can't dilute the falloff or the spread arithmetic.
-                int count = line != null ? line.Length : n;
+                // Cross-axis attenuation: the effect fades with distance away from the slab, not
+                // just along it. Without this a cursor one pixel outside the dock gets the full
+                // effect while one pixel further out gets nothing — a hard edge. With it, proximity
+                // is smooth in every direction, macOS style. The reach is deliberately tight, and
+                // past the deadzone it is exactly zero: tiles there sit at rest, full stop.
+                double unit = Config.IconSize + Config.TileSpacing;
+                double sigmaCross = Math.Max(0.3, Config.MagnifyFalloff) * 0.55 * unit;
+                double deadzone = 1.5 * unit;
+                double crossMin, crossMax;
+                if (horiz) { crossMin = 0; crossMax = ItemsHost.RenderSize.Height; }
+                else { crossMin = 0; crossMax = ItemsHost.RenderSize.Width; }
+                double mCross = horiz ? mouse.Value.Y : mouse.Value.X;
+                double crossDist = Math.Max(0, Math.Max(crossMin - mCross, mCross - crossMax));
+                double reach = crossDist >= deadzone
+                    ? 0.0
+                    : Math.Exp(-(crossDist * crossDist) / (2 * sigmaCross * sigmaCross));
 
-                for (int k = 0; k < count; k++)
+                for (int i = 0; i < n; i++)
                 {
-                    int i = line != null ? line[k] : k;
                     if (cps[i] == null) continue;
                     double dist = Math.Abs(m - centre[i]);
 
                     if (Config.Magnify)
                     {
-                        double sigma = Math.Max(0.25, Config.MagnifyFalloff) * extent[i];
-                        double f = Math.Exp(-(dist * dist) / (2 * sigma * sigma));
+                        // Falloff is measured in tile units, not in actual tile widths — labels
+                        // make tiles up to 1.7x the icon wide, and a sigma that wide pulled every
+                        // tile on the dock into the ripple. One falloff unit ≈ the hovered tile
+                        // plus its immediate neighbours, which is the macOS look.
+                        double sigma = Math.Max(0.25, Config.MagnifyFalloff) * 0.6 * unit;
+                        double f = Math.Exp(-(dist * dist) / (2 * sigma * sigma)) * reach;
                         scale[i] = 1.0 + (maxScale - 1.0) * f;
                         plate[i] = 0.95 * f;
                     }
                     else
                     {
-                        bool over = dist <= extent[i] / 2.0;
+                        bool over = dist <= extent[i] / 2.0 && reach >= 0.5;
                         scale[i] = over ? maxScale : 1.0;
                         plate[i] = over ? 0.95 : 0.0;
                     }
                 }
 
-                // --- re-spread so nothing overlaps ------------------------
+                // --- re-spread so nothing overlaps, one line at a time ----
                 if (Config.Magnify)
                 {
-                    // growth[i] = how far tile i's centre would slide if every tile before it grew.
-                    double running = 0;
-                    double[] growth = new double[count];
-                    for (int k = 0; k < count; k++)
+                    foreach (int[] line in LinesOf(cps, cross, n, horiz, fallbackUnit))
                     {
-                        int i = line != null ? line[k] : k;
-                        double extra = extent[i] * (scale[i] - 1.0);
-                        growth[k] = running + extra / 2.0;
-                        running += extra;
-                    }
+                        int count = line.Length;
 
-                    // Anchor the spread at the cursor, interpolated across the tile it sits on so
-                    // the whole row doesn't jump when the cursor crosses a boundary.
-                    double anchor = 0;
-                    for (int k = 0; k < count; k++)
-                    {
-                        int i = line != null ? line[k] : k;
-                        double extra = extent[i] * (scale[i] - 1.0);
-                        double left = centre[i] - extent[i] / 2.0;
-                        double t = (m - left) / Math.Max(1, extent[i]);
-                        anchor += extra * Math.Max(0, Math.Min(1, t));
-                    }
+                        // growth[k] = how far tile k's centre would slide if every tile before it grew.
+                        double running = 0;
+                        double[] growth = new double[count];
+                        for (int k = 0; k < count; k++)
+                        {
+                            double extra = extent[line[k]] * (scale[line[k]] - 1.0);
+                            growth[k] = running + extra / 2.0;
+                            running += extra;
+                        }
 
-                    double cap = MagnifyBleed;
-                    for (int k = 0; k < count; k++)
-                    {
-                        int i = line != null ? line[k] : k;
-                        offset[i] = Math.Max(-cap, Math.Min(cap, growth[k] - anchor));
+                        // Anchor the spread at the cursor, interpolated across the tile it sits on so
+                        // the whole line doesn't jump when the cursor crosses a boundary.
+                        double anchor = 0;
+                        for (int k = 0; k < count; k++)
+                        {
+                            int i = line[k];
+                            double extra = extent[i] * (scale[i] - 1.0);
+                            double left = centre[i] - extent[i] / 2.0;
+                            double t = (m - left) / Math.Max(1, extent[i]);
+                            anchor += extra * Math.Max(0, Math.Min(1, t));
+                        }
+
+                        double cap = MagnifyBleed;
+                        for (int k = 0; k < count; k++)
+                        {
+                            int i = line[k];
+                            offset[i] = Math.Max(-cap, Math.Min(cap, growth[k] - anchor));
+                        }
                     }
                 }
             }
@@ -1152,6 +1157,72 @@ namespace Dockyard
                     if (tb != null) tb.Opacity = 0.62 + 0.38 * plate[i];
                 }
             }
+        }
+
+        /// <summary>
+        /// Group tile indices into lines (rows when horizontal, columns when vertical) so each
+        /// line can re-spread independently. Tiles are uniform, so a tile's line is just its
+        /// cross-axis centre divided by the line pitch. One line when Rows is 1.
+        /// </summary>
+        private int[][] LinesOf(ContentPresenter[] cps, double[] cross, int n, bool horiz, double fallbackUnit)
+        {
+            if (Rows <= 1)
+            {
+                int[] all = new int[n];
+                for (int i = 0; i < n; i++) all[i] = i;
+                return new int[][] { all };
+            }
+
+            double pitch = 0;
+            for (int i = 0; i < n; i++)
+                if (cps[i] != null)
+                    pitch = Math.Max(pitch, horiz ? cps[i].ActualHeight : cps[i].ActualWidth);
+            if (pitch <= 1) pitch = fallbackUnit;
+
+            SortedDictionary<int, List<int>> groups = new SortedDictionary<int, List<int>>();
+            for (int i = 0; i < n; i++)
+            {
+                if (cps[i] == null) continue;
+                int line = Math.Max(0, (int)(cross[i] / pitch));
+                if (!groups.TryGetValue(line, out List<int> g))
+                {
+                    g = new List<int>();
+                    groups[line] = g;
+                }
+                g.Add(i);
+            }
+
+            int[][] result = new int[groups.Count][];
+            int k = 0;
+            foreach (List<int> g in groups.Values) result[k++] = g.ToArray();
+            return result;
+        }
+
+        /// <summary>
+        /// Cursor tracking for out-of-window magnification. Maps the global cursor position into
+        /// host coordinates and feeds it to the same magnification math the window's own mouse
+        /// events use. No distance cut-off here: the falloff in UpdateMagnification fades the
+        /// effect to nothing with distance, so feeding it the true position everywhere is what
+        /// makes approaching the dock feel gradual instead of switching on at a boundary.
+        /// </summary>
+        private void UpdateProximity()
+        {
+            if (_closing || !IsLoaded || !IsVisible || _dragging || _reordering || _autoHidden) return;
+
+            // No IsMouseOver short-circuit here: the shadow margin around the slab is transparent
+            // and click-through, so the cursor can be "on the window" without WPF mouse events
+            // ever firing. Feeding the position unconditionally covers that gap, and recomputing
+            // the same math the mouse path runs is harmless.
+
+            POINT p;
+            if (!Native.GetCursorPos(out p)) return;
+            Vector v = DeviceToDip(p.X, p.Y);
+
+            Point host;
+            try { host = ItemsHost.PointFromScreen(new Point(v.X, v.Y)); }
+            catch { return; }                        // window not on screen right now
+
+            UpdateMagnification(host, true);
         }
 
         /// <summary>
