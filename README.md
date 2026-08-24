@@ -202,4 +202,7 @@ the obvious way, which is usually because the obvious way doesn't work.
 
 Built with WPF on .NET. No NuGet packages — just the framework and a fair amount of Win32.
 
+Written by [ZenCodeOrSomeShit](https://github.com/ZenCodeOrSomeShit), pair-programmed with
+[Claude](https://claude.ai).
+
 MIT licensed — see [LICENSE](LICENSE).
