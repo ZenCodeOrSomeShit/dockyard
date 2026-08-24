@@ -21,3 +21,6 @@ diagnose.txt
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# release output
+release/

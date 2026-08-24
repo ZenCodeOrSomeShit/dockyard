@@ -17,7 +17,7 @@
     <RootNamespace>Dockyard</RootNamespace>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Product>Dockyard</Product>
     <Description>A themeable desktop dock widget for Windows.</Description>
 

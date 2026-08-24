@@ -6,10 +6,10 @@
 ; Built by publish-release.bat. Expects ..\release\Dockyard.exe to already exist.
 
 #define AppName        "Dockyard"
-#define AppVersion     "1.0.0"
+#define AppVersion     "1.1.0"
 #define AppPublisher   "Niko Huebert"
 #define AppExeName     "Dockyard.exe"
-#define AppUrl         "https://github.com/nikohuebert/dockyard"
+#define AppUrl         "https://github.com/ZenCodeOrSomeShit/dockyard"
 
 [Setup]
 AppId={{7B3F9C41-6E2A-4D58-9C1E-DA0B4F72E9A3}
